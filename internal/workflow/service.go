@@ -93,16 +93,27 @@ func (s *Service) mutate(batchID, action string, meta CommandMeta, status int, f
 	batch.Revision++
 	batch.UpdatedAt = now
 	response.Batch = batch
-	body, err := json.Marshal(response)
-	if err != nil {
-		return Result{}, err
-	}
 	payload := map[string]any{"state": batch.State}
 	if len(response.Corrections) > 0 {
 		payload["processed_count"] = len(response.Corrections)
 	}
 	event := domain.AuditEvent{EventID: domain.StableID(batchID, fmt.Sprint(batch.Revision), meta.RequestID), BatchID: batchID, Revision: batch.Revision, RequestID: meta.RequestID, Action: action, ActorID: actor, Reason: reason, OccurredAt: now, PreviousDigest: snap.LastEvent, Payload: payload}
 	if err := domain.FinalizeEvent(&event); err != nil {
+		return Result{}, err
+	}
+	if response.Manifest != nil {
+		finalized, err := domain.FinalizeManifest(*response.Manifest, event.Digest)
+		if err != nil {
+			return Result{}, err
+		}
+		response.Manifest = &finalized
+		if batch.Review != nil {
+			batch.Review.ManifestDigest = finalized.ManifestDigest
+			batch.Review.EventChainDigest = finalized.EventChainDigest
+		}
+	}
+	body, err := json.Marshal(response)
+	if err != nil {
 		return Result{}, err
 	}
 	snap.Batch = batch

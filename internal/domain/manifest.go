@@ -43,6 +43,21 @@ func BuildManifest(batch *DendroBatch, eventDigest string, now time.Time) (Manif
 	return m, nil
 }
 
+// FinalizeManifest binds the manifest to the final audit event of the sealed
+// batch. It sets EventChainDigest to the seal event digest and recomputes
+// ManifestDigest so that the manifest refers to the same audit chain head as
+// the snapshot's LastEvent and the review seal.
+func FinalizeManifest(m Manifest, eventDigest string) (Manifest, error) {
+	m.EventChainDigest = eventDigest
+	m.ManifestDigest = ""
+	d, err := Digest(m)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m.ManifestDigest = d
+	return m, nil
+}
+
 func VerifyManifest(m Manifest) bool {
 	expected := m.ManifestDigest
 	m.ManifestDigest = ""

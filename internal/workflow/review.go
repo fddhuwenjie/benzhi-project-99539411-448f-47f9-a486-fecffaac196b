@@ -76,5 +76,7 @@ func (s *Service) Seal(batchID string, cmd SealCommand) (Result, error) {
 		batch.Review.ManifestDigest = manifest.ManifestDigest
 		batch.Review.EventChainDigest = manifest.EventChainDigest
 		return &CommandResponse{Manifest: &manifest}, "生成并校验确定性封存清单", "", nil
+		// Note: mutate() finalizes the manifest EventChainDigest with the
+		// seal event digest and refreshes ManifestDigest and review seal.
 	})
 }
