@@ -24,6 +24,9 @@ func (s *Store) Commit(snap *Snapshot, event domain.AuditEvent) error {
 		if snap.Batch.Revision != 1 || event.Revision != 1 || event.PreviousDigest != "" {
 			return domain.NewError(domain.ErrConflict, "revision", "首个提交的 revision 必须为 1")
 		}
+		if prev, statErr := os.Stat(s.auditPath(snap.Batch.BatchID)); statErr == nil && prev.Size() > 0 {
+			return domain.NewError(domain.ErrIntegrity, "audit", "批次 %s 存在未恢复的孤儿审计，拒绝追加", snap.Batch.BatchID)
+		}
 	} else {
 		if snap.Batch.Revision != current.Batch.Revision+1 {
 			return domain.NewError(domain.ErrConflict, "revision", "保存 revision 不连续")
