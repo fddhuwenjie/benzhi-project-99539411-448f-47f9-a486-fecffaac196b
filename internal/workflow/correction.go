@@ -21,7 +21,11 @@ func (s *Service) CorrectFindings(batchID string, cmd CorrectFindingsCommand) (R
 }
 
 func (s *Service) correctFindings(batchID, action string, cmd CorrectFindingsCommand) (Result, error) {
-	return s.mutate(batchID, action, cmd.CommandMeta, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest(action, cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, action, cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := requireOperator(batch, cmd.ActorID); err != nil {
 			return nil, "", "", err
 		}

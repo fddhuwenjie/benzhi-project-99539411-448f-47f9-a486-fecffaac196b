@@ -57,9 +57,20 @@ func validateMeta(meta CommandMeta) error {
 	return nil
 }
 
+// commandDigest 计算影响命令语义的请求指纹。它包含 action、actor 及全部
+// 业务字段，但排除 request_id（作为幂等键本身）与 expected_revision
+// （随状态推进而变化，不构成请求语义差异）。同一 request_id 重放时，只有
+// 指纹一致才允许逐字节重放首次响应；否则视为内容冲突，返回稳定错误且不改动任何状态。
+func commandDigest(action string, cmd any) (string, error) {
+	return domain.Digest(struct {
+		Action string `json:"action"`
+		Cmd    any    `json:"cmd"`
+	}{Action: action, Cmd: cmd})
+}
+
 type mutation func(batch *domain.DendroBatch, snap *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error)
 
-func (s *Service) mutate(batchID, action string, meta CommandMeta, status int, fn mutation) (Result, error) {
+func (s *Service) mutate(batchID, action string, meta CommandMeta, requestDigest string, status int, fn mutation) (Result, error) {
 	if err := validateMeta(meta); err != nil {
 		return Result{}, err
 	}
@@ -72,6 +83,9 @@ func (s *Service) mutate(batchID, action string, meta CommandMeta, status int, f
 	if previous, ok := snap.Idempotency[meta.RequestID]; ok {
 		if previous.Action != action {
 			return Result{}, domain.NewError(domain.ErrConflict, "request_id", "request_id 已用于其他操作")
+		}
+		if previous.RequestDigest != requestDigest {
+			return Result{}, domain.NewError(domain.ErrConflict, "request_id", "request_id 已用于不同内容的请求，拒绝重放")
 		}
 		return Result{StatusCode: previous.StatusCode, Body: append(json.RawMessage(nil), previous.Response...), Replayed: true}, nil
 	}
@@ -106,7 +120,7 @@ func (s *Service) mutate(batchID, action string, meta CommandMeta, status int, f
 		return Result{}, err
 	}
 	snap.Batch = batch
-	snap.Idempotency[meta.RequestID] = repository.IdempotencyRecord{RequestID: meta.RequestID, Action: action, StatusCode: status, Response: body, Revision: batch.Revision}
+	snap.Idempotency[meta.RequestID] = repository.IdempotencyRecord{RequestID: meta.RequestID, Action: action, RequestDigest: requestDigest, StatusCode: status, Response: body, Revision: batch.Revision}
 	if response.Manifest != nil {
 		m := *response.Manifest
 		snap.Manifest = &m
@@ -130,10 +144,17 @@ func (s *Service) Create(cmd CreateBatchCommand) (Result, error) {
 	if cmd.ExpectedRevision != 0 {
 		return Result{}, domain.NewError(domain.ErrConflict, "expected_revision", "创建批次时 expected_revision 必须为 0")
 	}
+	requestDigest, err := commandDigest("CREATE_BATCH", cmd)
+	if err != nil {
+		return Result{}, err
+	}
 	unlock := s.locks.lock(cmd.BatchID)
 	defer unlock()
 	if existing, err := s.store.Load(cmd.BatchID); err == nil {
 		if rec, ok := existing.Idempotency[cmd.RequestID]; ok && rec.Action == "CREATE_BATCH" {
+			if rec.RequestDigest != requestDigest {
+				return Result{}, domain.NewError(domain.ErrConflict, "request_id", "request_id 已用于不同内容的请求，拒绝重放")
+			}
 			return Result{StatusCode: rec.StatusCode, Body: rec.Response, Replayed: true}, nil
 		}
 		return Result{}, domain.NewError(domain.ErrConflict, "batch_id", "批次 %s 已存在", cmd.BatchID)
@@ -141,7 +162,8 @@ func (s *Service) Create(cmd CreateBatchCommand) (Result, error) {
 		return Result{}, err
 	}
 	now := s.clock()
-	batch := &domain.DendroBatch{BatchID: cmd.BatchID, SiteCode: strings.TrimSpace(cmd.SiteCode), Species: strings.TrimSpace(cmd.Species), SampledAt: cmd.SampledAt, OperatorID: cmd.OperatorID, State: domain.StateBaselined, Revision: 1, CreatedAt: now, UpdatedAt: now, Cores: cmd.Cores}
+	cores := append([]domain.CoreSample(nil), cmd.Cores...)
+	batch := &domain.DendroBatch{BatchID: cmd.BatchID, SiteCode: strings.TrimSpace(cmd.SiteCode), Species: strings.TrimSpace(cmd.Species), SampledAt: cmd.SampledAt, OperatorID: cmd.OperatorID, State: domain.StateBaselined, Revision: 1, CreatedAt: now, UpdatedAt: now, Cores: cores}
 	if err := domain.ValidateNewBatch(batch, now); err != nil {
 		return Result{}, err
 	}
@@ -155,7 +177,7 @@ func (s *Service) Create(cmd CreateBatchCommand) (Result, error) {
 		return Result{}, err
 	}
 	snap := repository.NewSnapshot(batch)
-	snap.Idempotency[cmd.RequestID] = repository.IdempotencyRecord{RequestID: cmd.RequestID, Action: "CREATE_BATCH", StatusCode: 201, Response: body, Revision: 1}
+	snap.Idempotency[cmd.RequestID] = repository.IdempotencyRecord{RequestID: cmd.RequestID, Action: "CREATE_BATCH", RequestDigest: requestDigest, StatusCode: 201, Response: body, Revision: 1}
 	if err := s.store.Commit(snap, event); err != nil {
 		return Result{}, err
 	}

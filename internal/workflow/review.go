@@ -12,7 +12,11 @@ func (s *Service) Review(batchID string, cmd ReviewCommand) (Result, error) {
 	if cmd.ActorID == "" {
 		cmd.ActorID = cmd.ReviewerID
 	}
-	return s.mutate(batchID, "REVIEW_BATCH", cmd.CommandMeta, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest("REVIEW_BATCH", cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, "REVIEW_BATCH", cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := domain.EnsureState(batch, domain.StateReviewReady); err != nil {
 			return nil, "", "", err
 		}
@@ -60,7 +64,11 @@ func (s *Service) Review(batchID string, cmd ReviewCommand) (Result, error) {
 }
 
 func (s *Service) Seal(batchID string, cmd SealCommand) (Result, error) {
-	return s.mutate(batchID, "SEAL_BATCH", cmd.CommandMeta, 200, func(batch *domain.DendroBatch, snap *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest("SEAL_BATCH", cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, "SEAL_BATCH", cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, snap *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := requireOperator(batch, cmd.ActorID); err != nil {
 			return nil, "", "", err
 		}

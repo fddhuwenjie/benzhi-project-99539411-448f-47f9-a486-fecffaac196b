@@ -15,11 +15,12 @@ import (
 var ErrNotFound = errors.New("repository: batch not found")
 
 type IdempotencyRecord struct {
-	RequestID  string          `json:"request_id"`
-	Action     string          `json:"action"`
-	StatusCode int             `json:"status_code"`
-	Response   json.RawMessage `json:"response"`
-	Revision   int64           `json:"revision"`
+	RequestID      string          `json:"request_id"`
+	Action         string          `json:"action"`
+	RequestDigest  string          `json:"request_digest"`
+	StatusCode     int             `json:"status_code"`
+	Response       json.RawMessage `json:"response"`
+	Revision       int64           `json:"revision"`
 }
 
 type Snapshot struct {

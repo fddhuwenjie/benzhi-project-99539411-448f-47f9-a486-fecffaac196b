@@ -11,7 +11,11 @@ import (
 )
 
 func (s *Service) RegisterImages(batchID string, cmd RegisterImagesCommand) (Result, error) {
-	return s.mutate(batchID, "REGISTER_IMAGES", cmd.CommandMeta, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest("REGISTER_IMAGES", cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, "REGISTER_IMAGES", cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := requireOperator(batch, cmd.ActorID); err != nil {
 			return nil, "", "", err
 		}
@@ -50,7 +54,11 @@ func (s *Service) RegisterImages(batchID string, cmd RegisterImagesCommand) (Res
 }
 
 func (s *Service) SubmitObservations(batchID string, cmd SubmitObservationsCommand) (Result, error) {
-	return s.mutate(batchID, "SUBMIT_OBSERVATIONS", cmd.CommandMeta, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest("SUBMIT_OBSERVATIONS", cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, "SUBMIT_OBSERVATIONS", cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := requireOperator(batch, cmd.ActorID); err != nil {
 			return nil, "", "", err
 		}
@@ -60,10 +68,11 @@ func (s *Service) SubmitObservations(batchID string, cmd SubmitObservationsComma
 		if len(cmd.Observations) == 0 {
 			return nil, "", "", domain.NewError(domain.ErrValidation, "observations", "观测列表不能为空")
 		}
+		observations := append([]domain.RingObservation(nil), cmd.Observations...)
 		seenID := map[string]bool{}
 		perCore := map[string]int{}
-		for i := range cmd.Observations {
-			o := &cmd.Observations[i]
+		for i := range observations {
+			o := &observations[i]
 			if !domain.HasCore(batch, o.CoreID) {
 				return nil, "", "", domain.NewError(domain.ErrValidation, "core_id", "观测引用未知样芯 %s", o.CoreID)
 			}
@@ -85,21 +94,25 @@ func (s *Service) SubmitObservations(batchID string, cmd SubmitObservationsComma
 				return nil, "", "", domain.NewError(domain.ErrValidation, "observations", "样芯 %s 没有观测", c.CoreID)
 			}
 		}
-		sort.Slice(cmd.Observations, func(i, j int) bool {
-			if cmd.Observations[i].CoreID == cmd.Observations[j].CoreID {
-				return cmd.Observations[i].RingIndex < cmd.Observations[j].RingIndex
+		sort.Slice(observations, func(i, j int) bool {
+			if observations[i].CoreID == observations[j].CoreID {
+				return observations[i].RingIndex < observations[j].RingIndex
 			}
-			return cmd.Observations[i].CoreID < cmd.Observations[j].CoreID
+			return observations[i].CoreID < observations[j].CoreID
 		})
-		batch.Observations = append([]domain.RingObservation(nil), cmd.Observations...)
+		batch.Observations = append([]domain.RingObservation(nil), observations...)
 		batch.Findings = nil
 		batch.State = domain.StateAnalyzed
-		return &CommandResponse{}, fmt.Sprintf("提交 %d 条年轮观测", len(cmd.Observations)), "", nil
+		return &CommandResponse{}, fmt.Sprintf("提交 %d 条年轮观测", len(observations)), "", nil
 	})
 }
 
 func (s *Service) Validate(batchID string, cmd ValidateCommand) (Result, error) {
-	return s.mutate(batchID, "RUN_QUALITY_RULES", cmd.CommandMeta, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
+	digest, err := commandDigest("RUN_QUALITY_RULES", cmd)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.mutate(batchID, "RUN_QUALITY_RULES", cmd.CommandMeta, digest, 200, func(batch *domain.DendroBatch, _ *repository.Snapshot, now time.Time) (*CommandResponse, string, string, error) {
 		if err := requireOperator(batch, cmd.ActorID); err != nil {
 			return nil, "", "", err
 		}
