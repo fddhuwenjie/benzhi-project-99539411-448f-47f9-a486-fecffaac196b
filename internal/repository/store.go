@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"dendro-chronology-workbench/internal/domain"
 )
@@ -37,7 +38,12 @@ type Store struct {
 	audit         string
 	mu            sync.RWMutex
 	cacheMu       sync.RWMutex
-	snapshotCache map[string]*Snapshot
+	snapshotCache map[string]*cachedSnapshot
+}
+
+type cachedSnapshot struct {
+	snapshot *Snapshot
+	modTime  time.Time
 }
 
 func Open(root string) (*Store, error) {
@@ -48,7 +54,7 @@ func Open(root string) (*Store, error) {
 		root:          root,
 		snapshots:     filepath.Join(root, "snapshots"),
 		audit:         filepath.Join(root, "audit"),
-		snapshotCache: map[string]*Snapshot{},
+		snapshotCache: map[string]*cachedSnapshot{},
 	}
 	if err := os.MkdirAll(s.snapshots, 0o750); err != nil {
 		return nil, fmt.Errorf("创建快照目录: %w", err)
@@ -72,16 +78,22 @@ func (s *Store) loadUnlocked(batchID string) (*Snapshot, error) {
 	if err := domain.ValidateID("batch_id", batchID); err != nil {
 		return nil, err
 	}
+	path := s.snapshotPath(batchID)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.invalidateSnapshot(batchID)
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
 	s.cacheMu.RLock()
 	cached := s.snapshotCache[batchID]
 	s.cacheMu.RUnlock()
-	if cached != nil {
-		return cloneSnapshot(cached)
+	if cached != nil && cached.modTime.Equal(info.ModTime()) {
+		return cloneSnapshot(cached.snapshot)
 	}
-	b, err := os.ReadFile(s.snapshotPath(batchID))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrNotFound
-	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +104,12 @@ func (s *Store) loadUnlocked(batchID string) (*Snapshot, error) {
 	if err := verifySnapshot(&snap); err != nil {
 		return nil, err
 	}
-	cached, err = cloneSnapshot(&snap)
+	stored, err := cloneSnapshot(&snap)
 	if err != nil {
 		return nil, err
 	}
 	s.cacheMu.Lock()
-	s.snapshotCache[batchID] = cached
+	s.snapshotCache[batchID] = &cachedSnapshot{snapshot: stored, modTime: info.ModTime()}
 	s.cacheMu.Unlock()
 	return cloneSnapshot(&snap)
 }
