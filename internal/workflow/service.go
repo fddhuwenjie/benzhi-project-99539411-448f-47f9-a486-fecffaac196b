@@ -25,6 +25,33 @@ type cachedAuditEvents struct {
 	events    []domain.AuditEvent
 }
 
+// cloneAuditEvents returns a deep copy of the given audit events so that
+// mutations to a returned slice or its nested Payload never leak back into
+// the cache or persisted data. Each call yields an independent copy.
+func cloneAuditEvents(events []domain.AuditEvent) []domain.AuditEvent {
+	if events == nil {
+		return nil
+	}
+	out := make([]domain.AuditEvent, len(events))
+	for i := range events {
+		out[i] = events[i]
+		if events[i].Payload != nil {
+			b, err := json.Marshal(events[i].Payload)
+			if err != nil {
+				out[i].Payload = events[i].Payload
+				continue
+			}
+			var copyPayload any
+			if err := json.Unmarshal(b, &copyPayload); err != nil {
+				out[i].Payload = events[i].Payload
+				continue
+			}
+			out[i].Payload = copyPayload
+		}
+	}
+	return out
+}
+
 func New(store *repository.Store) *Service {
 	return &Service{
 		store:       store,
@@ -58,16 +85,17 @@ func (s *Service) Events(id string) ([]domain.AuditEvent, error) {
 	cached, ok := s.eventsCache[id]
 	s.eventsMu.RUnlock()
 	if ok && cached.lastEvent == snap.LastEvent {
-		return cached.events, nil
+		return cloneAuditEvents(cached.events), nil
 	}
 	e, err := s.store.Events(id)
 	if err != nil {
 		return nil, translateRepo(err)
 	}
+	cachedEvents := cloneAuditEvents(e)
 	s.eventsMu.Lock()
-	s.eventsCache[id] = cachedAuditEvents{lastEvent: snap.LastEvent, events: e}
+	s.eventsCache[id] = cachedAuditEvents{lastEvent: snap.LastEvent, events: cachedEvents}
 	s.eventsMu.Unlock()
-	return e, nil
+	return cloneAuditEvents(e), nil
 }
 
 func validateMeta(meta CommandMeta) error {
