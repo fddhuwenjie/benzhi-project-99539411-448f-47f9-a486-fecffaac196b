@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="树木年轮样芯年代序列裁定工作台">
+  <title>树木年轮年代裁定工作台</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><p class="eyebrow">DENDROCHRONOLOGY LAB</p><h1>样芯年代裁定工作台</h1></div>
+    <div id="connection" class="connection">正在连接…</div>
+  </header>
+  <main class="shell">
+    <aside class="sidebar">
+      <div class="side-head"><h2>样芯批次</h2><button id="newBatch" class="button ghost">新建</button></div>
+      <form id="batchFilters" class="filter-form">
+        <label>状态<select name="status"><option value="">全部状态</option><option>BASELINED</option><option>IMAGED</option><option>ANALYZED</option><option>CORRECTION_REQUIRED</option><option>REVIEW_READY</option><option>VERIFIED</option><option>SEALED</option></select></label>
+        <label>站点<input name="site_code" maxlength="64" placeholder="站点关键词"></label>
+        <label>树种<input name="species" maxlength="64" placeholder="树种关键词"></label>
+        <label>测量员<input name="operator_id" maxlength="64" placeholder="测量员关键词"></label>
+        <label>批次编号<input name="batch_id" maxlength="64" placeholder="批次关键词"></label>
+        <div class="filter-actions"><button class="button primary">筛选</button><button id="resetFilters" type="button" class="button ghost">重置</button></div>
+      </form>
+      <div id="batchStatistics" class="sidebar-stats"></div>
+      <div id="batchList" class="batch-list" aria-live="polite"></div>
+    </aside>
+    <section class="workspace">
+      <div id="notice" class="notice hidden" role="alert"></div>
+      <section id="welcome" class="welcome">
+        <p class="eyebrow">EVIDENCE FIRST</p>
+        <h2>从采样基线到不可变封存</h2>
+        <p>选择左侧批次，或创建一个批次开始。每次写入均携带请求编号和预期修订号，审计证据将沿哈希链保存。</p>
+      </section>
+
+      <section id="createPanel" class="panel hidden">
+        <div class="panel-title"><div><p class="step">步骤 01</p><h2>冻结采样基线</h2></div><span class="state">DRAFT → BASELINED</span></div>
+        <form id="createForm" class="form-grid">
+          <label>批次编号<input name="batch_id" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,63}" placeholder="batch-2026-001"></label>
+          <label>站点代码<input name="site_code" required placeholder="SITE-NORTH"></label>
+          <label>树种<input name="species" required placeholder="Pinus tabuliformis"></label>
+          <label>采样日期<input name="sampled_at" type="datetime-local" required></label>
+          <label>测量员编号<input name="operator_id" required placeholder="operator-01"></label>
+          <div class="wide"><div class="table-head"><h3>样芯清单</h3><button type="button" class="button ghost" data-add-core>添加样芯</button></div><table><thead><tr><th>样芯编号</th><th>树木代码</th><th>半径代码</th><th></th></tr></thead><tbody id="coreRows"></tbody></table></div>
+          <div class="actions wide"><button class="button primary">创建并冻结基线</button></div>
+        </form>
+      </section>
+
+      <section id="batchPanel" class="hidden">
+        <div class="batch-hero"><div><p id="batchMeta" class="eyebrow"></p><h2 id="batchTitle"></h2><p id="batchSubtitle"></p></div><div><span id="batchState" class="state large"></span><p id="batchRevision" class="revision"></p></div></div>
+        <nav id="progress" class="progress" aria-label="流程进度"></nav>
+
+        <section id="imageStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 02</p><h2>登记制备影像</h2></div><span>覆盖全部基线样芯</span></div>
+          <form id="imageForm"><div class="table-scroll"><table><thead><tr><th>样芯</th><th>制备方法</th><th>SHA-256 摘要</th><th>微米/像素</th><th>采集时间</th></tr></thead><tbody id="imageRows"></tbody></table></div><div class="actions"><button class="button primary">校验并登记影像</button></div></form>
+        </section>
+
+        <section id="observationStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 03</p><h2>录入年轮序列</h2></div><button id="addObservation" class="button ghost">添加观测</button></div>
+          <form id="observationForm"><div class="table-scroll"><table class="measure-table"><thead><tr><th>样芯</th><th>观测编号</th><th>序号</th><th>公历年</th><th>宽度 μm</th><th>边界位置</th><th>标记</th><th>解释</th><th>锚点组</th><th></th></tr></thead><tbody id="observationRows"></tbody></table></div><div class="actions"><button class="button primary">提交候选序列</button></div></form>
+        </section>
+
+        <section id="validateStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 04</p><h2>确定性质量裁定</h2></div><span>连续性 · 范围 · 标记 · 锚点 · 相关性</span></div>
+          <p>规则集每次从当前有效观测重新计算；结果不会依赖提交顺序。</p><div class="actions"><button id="runValidation" class="button primary">运行质量规则</button></div>
+        </section>
+
+        <section id="findingStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 05</p><h2>异常整改</h2></div><span id="findingCount" class="counter"></span></div>
+          <div id="findingList" class="finding-list"></div>
+          <div class="actions"><button id="submitCorrections" class="button primary">批量提交所选整改并统一复验</button></div>
+        </section>
+
+        <section id="reviewStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 06</p><h2>独立复核</h2></div><span>人员分离强制校验</span></div>
+          <div id="reviewInspection" class="inspection"><p class="empty">填写复核员编号后加载当前 revision 的证据预检。</p></div>
+          <form id="reviewForm" class="form-grid"><label>复核员编号<input name="reviewer_id" required></label><label>决定<select name="decision"><option value="APPROVE">签署通过</option><option value="RETURN">退回整改</option></select></label><label class="wide">复核说明<textarea name="note" minlength="4" required placeholder="已核验基线、影像摘要、修订轨迹与规则结果"></textarea></label><div class="actions wide"><button class="button primary">提交独立复核</button></div></form>
+        </section>
+
+        <section id="sealStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">步骤 07</p><h2>证据封存</h2></div><span>此操作不可撤销</span></div>
+          <p>将按稳定字段顺序生成年代序列清单、证据摘要和前序事件链摘要，并把批次设为不可编辑。</p><div class="actions"><button id="sealBatch" class="button danger">生成清单并永久封存</button></div>
+        </section>
+
+        <section id="manifestStep" class="panel step-panel hidden">
+          <div class="panel-title"><div><p class="step">SEALED</p><h2>封存清单</h2></div><a id="downloadManifest" class="button ghost" download>下载 JSON</a></div>
+          <dl id="manifestSummary" class="manifest-summary"></dl><pre id="manifestJson"></pre>
+        </section>
+
+        <section class="panel evidence-panel"><div class="panel-title"><h2>证据概览</h2><button id="refreshBatch" class="button ghost">刷新</button></div><div id="evidenceSummary" class="metrics"></div><details><summary>查看聚合 JSON</summary><pre id="batchJson"></pre></details></section>
+      </section>
+    </section>
+  </main>
+  <template id="coreRowTemplate"><tr><td><input data-field="core_id" required></td><td><input data-field="tree_code" required></td><td><input data-field="radius_code" required></td><td><button type="button" class="icon-button" data-remove aria-label="删除">×</button></td></tr></template>
+  <template id="observationRowTemplate"><tr><td><select data-field="core_id"></select></td><td><input data-field="observation_id" required></td><td><input data-field="ring_index" type="number" min="1" required></td><td><input data-field="calendar_year" type="number" min="1000" max="3000" required></td><td><input data-field="width_microns" type="number" step="0.01" required></td><td><input data-field="boundary_position" type="number" step="0.01" min="0" required></td><td><select data-field="marker_kind"><option>NONE</option><option>MISSING</option><option>FALSE</option></select></td><td><input data-field="marker_note"></td><td><input data-field="anchor_group"></td><td><button type="button" class="icon-button" data-remove>×</button></td></tr></template>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
